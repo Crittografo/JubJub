@@ -152,7 +152,7 @@ def test():
         b1 = (-u^2 + v^2 == 1 + d_JubJub*u^2*v^2)
         
         if b1 == False:
-            print "gen_keypairEdv failes"
+            print "gen_keypairEdv failed"
             return False 
         
         r, s = signEdw(hash, priv, q_JubJub, Gx_JubJub, Gy_JubJub, d_JubJub, e_JubJub, F_JubJub)
@@ -166,6 +166,58 @@ def test():
         testN = testN - 1
         
     return True
+
+
+import hashlib
+
+def create_points_for_hash(seed, N, d, e, F, p):
+    
+    n = 0
+     
+    y = int( hashlib.sha256(seed).hexdigest(), 16)
+    points = []
+    
+    while n < N:
+        
+        squareX = (F(y)^2 - 1)*(F(d)*F(y)^2 - F(e))^-1
+        
+        if kronecker(squareX, p) == 1:
+            
+            x = squareX.sqrt()
+            points.append([x, y])
+            n = n + 1
+         
+        y = int( hashlib.sha256(hex(y)).hexdigest(), 16)
+        
+            
+    return points
+
+def pedersen_hash(data, points, d, e, F):
+    x = 0
+    y = 1
+    
+    if(len(points) == 0):
+        ValueError("Array of points is empty") 
+    
+    if(len(points) < 8*len(data) or len(points) == 0):
+        ValueError("Number of points is not enougth to calculate hash")
+        
+    b = bytearray(data)
+
+    for i in range(len(b)):
+        for j in range(8):
+            if (b[i] >> j)&1:
+                x, y = add_points(x, y, points[i*8 + j][0], points[i*8 + j][1], d, e, F)
+    
+    return x, y
+
+def test_pedersen():
+    seed = "Hello, World!"
+    generators_list = create_points_for_hash(seed, 512, d_JubJub, e_JubJub, F_JubJub, p_JubJub)
+    
+    message = "The quick brown fox jumps over the lazy dog"
+    x, y = pedersen_hash(array1, points_list, d_JubJub, e_JubJub, F_JubJub)
+    print(x, y)   
 
 
 print test()
