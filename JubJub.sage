@@ -102,17 +102,26 @@ def gen_keypairEdv(q, Gx, Gy, d, e, F):
 
 
 
-def signEdw(hash, priv, q, Gx, Gy, d, e, F):
+def signEdw(hash, priv, q, Gx, Gy, d, e, p):
     Fq = GF(q)
-         
-    k, rx, ry = gen_keypairEdv(q, Gx, Gy, d, e, F)
+    Fp = GF(p)
+    recID = 0     
+    
+    k, rx, ry = gen_keypairEdv(q, Gx, Gy, d, e, Fp)
     s = (k^-1)*(Fq(hash) + priv*Fq(rx))
     
-    return Fq(rx), Fq(s)
+    recID = (int(rx))//q
+ 
+    if ry > p//2:
+         recID = recID + 0x80
+        
+    
+    return Fq(rx), Fq(s), recID 
 
 
-def verifyEdw(hash, r, s, Pubx, Puby, q, Gx, Gy, d, e, F):
+def verifyEdw(hash, r, s, Pubx, Puby, q, Gx, Gy, d, e, p):
     Fq = GF(q)
+    Fp = GF(p)
     
     if Fq(hash) == 0:
         return False
@@ -126,20 +135,54 @@ def verifyEdw(hash, r, s, Pubx, Puby, q, Gx, Gy, d, e, F):
     u1 = Fq(hash)*(Fq(s)^-1)
     u2 = Fq(r)*(Fq(s)^-1)
     
-    U1x, U1y = scalarMultEdw(u1, Gx, Gy, q, d, e, F)
-    U2x, U2y = scalarMultEdw(u2, Pubx, Puby, q, d, e, F)
+    U1x, U1y = scalarMultEdw(u1, Gx, Gy, q, d, e, Fp)
+    U2x, U2y = scalarMultEdw(u2, Pubx, Puby, q, d, e, Fp)
     
-    Ux, Uy = add_points(U1x, U1y, U2x, U2y, d, e, F)
+    Ux, Uy = add_points(U1x, U1y, U2x, U2y, d, e, Fp)
     
     if(Fq(Ux) == r):
         return True
     else:
         return False
 
+def recover_pub_key(hash, r, s, recoveryID, Gx, Gy, q, d, e, p):
+    Fq = GF(q)
+    Fp = GF(p)
 
+    # recover x:
+    Rx = r + (recoveryID & 0b1111111)*q
+ 
+    # recover y:
+    squareRy = (1 - Fp(e)*Fp(Rx)^2)*( 1 - Fp(d)*Fp(Rx)^2)^-1
+        
+    if kronecker(squareRy, p) == 1:
+        Ry = squareRy.sqrt()
+        
+        if recoveryID & 0x80:
+            Ry = p - Ry
+            
+    #Q = r^-1*s*R - r^-1*hash*G        
+    
+    s1 = int( Fq(r)^-1*Fq(s) )
+    
+    #scalarMultEdw(x, Px, Py, q, d, e, F )
+    
+    Q1x, Q1y = scalarMultEdw(s1, Rx, Ry, q, d, e, Fp)
+    
+    s2 = int( Fq(r)^-1*Fq(hash) )
+    s2 = q - s2
+    
+    Q2x, Q2y = scalarMultEdw(s2, Gx, Gy, q, d, e, Fp)
+    
+    x, y = add_points(Q1x, Q1y, Q2x, Q2y, d, e, Fp)
+            
+    return x, y
+    
+    
 def test():
     Fq = GF(q_JubJub)
     testN = 10
+    recoveryID = 0
     
     while testN != 0:
   
@@ -155,9 +198,19 @@ def test():
             print "gen_keypairEdv failed"
             return False 
         
-        r, s = signEdw(hash, priv, q_JubJub, Gx_JubJub, Gy_JubJub, d_JubJub, e_JubJub, F_JubJub)
+        r, s, recoveryID = signEdw(hash, priv, q_JubJub, Gx_JubJub, Gy_JubJub, d_JubJub, e_JubJub, p_JubJub)
         
-        b2 = verifyEdw(hash, r, s, pubX, pubY, q_JubJub, Gx_JubJub, Gy_JubJub, d_JubJub, e_JubJub, F_JubJub)
+        pubX_rec, pubY_rec = recover_pub_key(int(hash), int(r), int(s), recoveryID, Gx_JubJub, Gy_JubJub, q_JubJub, d_JubJub, e_JubJub, p_JubJub)
+        
+        if pubX != pubX_rec:
+            print "pubX != pubX_rec"
+            return False
+                
+        if pubY != pubY_rec:
+            print "pubY != pubY_rec"
+            return False
+           
+        b2 = verifyEdw(hash, r, s, pubX, pubY, q_JubJub, Gx_JubJub, Gy_JubJub, d_JubJub, e_JubJub, p_JubJub)
         
         if b2 == False:
             print "verifyEdw failed"
@@ -184,6 +237,7 @@ def create_points_for_hash(seed, N, d, e, F, p):
         if kronecker(squareX, p) == 1:
             
             x = squareX.sqrt()
+                            
             points.append([x, y])
             n = n + 1
          
@@ -211,17 +265,17 @@ def pedersen_hash(data, points, d, e, F):
     
     return x, y
 
+
 def test_pedersen():
     seed = "Hello, World!"
     generators_list = create_points_for_hash(seed, 512, d_JubJub, e_JubJub, F_JubJub, p_JubJub)
     
     message = "The quick brown fox jumps over the lazy dog"
-    x, y = pedersen_hash(array1, points_list, d_JubJub, e_JubJub, F_JubJub)
+    x, y = pedersen_hash(message, generators_list, d_JubJub, e_JubJub, F_JubJub)
     print(x, y)   
 
 
 print test()
-
 
 
 
