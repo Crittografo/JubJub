@@ -160,6 +160,8 @@ def recover_pub_key(hash, r, s, recoveryID, Gx, Gy, q, d, e, p):
         
         if recoveryID & 0x80:
             Ry = p - Ry
+    else:
+        return ValueError("Square root doesn't exist") 
             
     #Q = r^-1*s*R - r^-1*hash*G        
     
