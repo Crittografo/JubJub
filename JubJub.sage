@@ -1,7 +1,10 @@
-# edwards curve: 
+# twisted Edwards curve has form  
 # e*x^2 + y^2 = 1 + d*x^2*y^2 mod p
 
-# jubjub is edwards curve with parameters 
+# JubJub is Edwards curve. 
+# JubJub curve is related to BLS12-381 curves and has modulus p equal to prime subgroup order of BLS12-381  
+# that helps to create optimal zkSnarks with high (128-bit) level of security and minimal number of constraints 
+# for any cryptosystem whose operations are in field GF(p), where p is a modulus of JubJub   
 # e = -1, d = -10240/10241 mod p  ( == 0x2a9318e74bfa2b48f5fd9207e6bd7fd4292d7f6d37579d2601065fd6d6343eb1)
 # p = 0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001 
 # subgroup order: 
@@ -9,11 +12,27 @@ q_JubJub = 655448439689077380993096756352324572970592126587231728136535916239218
 d_JubJub = 0x2a9318e74bfa2b48f5fd9207e6bd7fd4292d7f6d37579d2601065fd6d6343eb1
 e_JubJub = -1
 p_JubJub = 0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001
+#p_JubJub = 52435875175126190479447740508185965837690552500527637822603658699938581184513
     
 F_JubJub = GF(p_JubJub)
 Gx_JubJub = F_JubJub(8076246640662884909881801758704306714034609987455869804520522091855516602923)
 Gy_JubJub = F_JubJub(13262374693698910701929044844600465831413122818447359594527400194675274060458)
 
+
+# BabyJubJub is Edwards curve with parameters 
+# BabyJubJub curve is related to BN128
+# subgroup order:
+q_BabyJubJub = 2736030358979909402780800718157159386076813972158567259200215660948447373041
+	      
+#coefficients e and d: 
+d_BabyJubJub = 168696 
+e_BabyJubJub = 168700
+#modulus
+p_BabyJubJub = 21888242871839275222246405745257275088548364400416034343698204186575808495617 
+F_BabyJubJub = GF(p_BabyJubJub)
+
+Gx_BabyJubJub = F_BabyJubJub(17777552123799933955779906779655732241715742912184938656739573121738514868268)
+Gy_BabyJubJub = F_BabyJubJub(2626589144620713026669568689430873010625803728049924121243784502389097019475)
  
  
 def add_points(x1, y1, x2, y2, d, e, F):
@@ -103,6 +122,7 @@ def gen_keypairEdv(q, Gx, Gy, d, e, F):
 
 
 def signEdw(hash, priv, q, Gx, Gy, d, e, p):
+
     Fq = GF(q)
     Fp = GF(p)
     recID = 0     
@@ -111,11 +131,12 @@ def signEdw(hash, priv, q, Gx, Gy, d, e, p):
     s = (k^-1)*(Fq(hash) + priv*Fq(rx))
     
     recID = (int(rx))//q
- 
+
+   
     if ry > p//2:
          recID = recID + 0x80
-        
-    
+   
+ 
     return Fq(rx), Fq(s), recID 
 
 
@@ -151,7 +172,7 @@ def recover_pub_key(hash, r, s, recoveryID, Gx, Gy, q, d, e, p):
 
     # recover x:
     Rx = r + (recoveryID & 0b1111111)*q
- 
+
     # recover y:
     squareRy = (1 - Fp(e)*Fp(Rx)^2)*( 1 - Fp(d)*Fp(Rx)^2)^-1
         
@@ -181,42 +202,35 @@ def recover_pub_key(hash, r, s, recoveryID, Gx, Gy, q, d, e, p):
     return x, y
     
     
-def test():
-    Fq = GF(q_JubJub)
-    testN = 10
-    recoveryID = 0
+def test(testN, p, q, e, d, Gx, Gy):
+
+    Fp = GF(p)
+    Fq = GF(q)
+ 
+    recID = 0
     
     while testN != 0:
   
         hash = Fq.random_element()
        
-        priv, pubX, pubY = gen_keypairEdv(q_JubJub, Gx_JubJub, Gy_JubJub, d_JubJub, e_JubJub, F_JubJub)
-        #print pubX, pubY
+        priv, pubX, pubY = gen_keypairEdv(q, Gx, Gy, d, e, Fp)
+        
         u = pubX
         v = pubY
-        b1 = (-u^2 + v^2 == 1 + d_JubJub*u^2*v^2)
+        b1 = (e*u^2 + v^2 == 1 + d*u^2*v^2)
         
         if b1 == False:
             print "gen_keypairEdv failed"
             return False 
         
-        r, s, recoveryID = signEdw(hash, priv, q_JubJub, Gx_JubJub, Gy_JubJub, d_JubJub, e_JubJub, p_JubJub)
-        
-        pubX_rec, pubY_rec = recover_pub_key(int(hash), int(r), int(s), recoveryID, Gx_JubJub, Gy_JubJub, q_JubJub, d_JubJub, e_JubJub, p_JubJub)
-        
-        if pubX != pubX_rec:
-            print "pubX != pubX_rec"
-            return False
-                
-        if pubY != pubY_rec:
-            print "pubY != pubY_rec"
-            return False
+        r, s, recID = signEdw(hash, priv, q, Gx, Gy, d, e, p)
+  
            
-        b2 = verifyEdw(hash, r, s, pubX, pubY, q_JubJub, Gx_JubJub, Gy_JubJub, d_JubJub, e_JubJub, p_JubJub)
+        b2 = verifyEdw(hash, r, s, pubX, pubY, q, Gx, Gy, d, e, p)
         
         if b2 == False:
             print "verifyEdw failed"
-            return False 
+            return False
         
         testN = testN - 1
         
@@ -277,7 +291,8 @@ def test_pedersen():
     print(x, y)   
 
 
-print test()
+print test(5, p_BabyJubJub, q_BabyJubJub, e_BabyJubJub, d_BabyJubJub,Gx_BabyJubJub, Gy_BabyJubJub )
+print test(5, p_JubJub, q_JubJub, e_JubJub, d_JubJub,Gx_JubJub, Gy_JubJub )
 
 
 
