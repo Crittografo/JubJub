@@ -1,8 +1,25 @@
 # twisted Edwards curve has form  
 # e*x^2 + y^2 = 1 + d*x^2*y^2 mod p
 
-# JubJub is Edwards curve. 
-# JubJub curve is related to BLS12-381 curves and has modulus p equal to prime subgroup order of BLS12-381  
+
+# BabyJubJub is Edwards curve related to curve Alt_Bn128
+# This curve is optimal to be used in zkSnarks in Ethereum
+
+# subgroup order:
+q_BabyJubJub = 2736030358979909402780800718157159386076813972158567259200215660948447373041
+	      
+#coefficients e and d: 
+d_BabyJubJub = 168696 
+e_BabyJubJub = 168700
+#modulus
+p_BabyJubJub = 21888242871839275222246405745257275088548364400416034343698204186575808495617 
+F_BabyJubJub = GF(p_BabyJubJub)
+
+Gx_BabyJubJub = F_BabyJubJub(17777552123799933955779906779655732241715742912184938656739573121738514868268)
+Gy_BabyJubJub = F_BabyJubJub(2626589144620713026669568689430873010625803728049924121243784502389097019475)
+
+
+# JubJub is Edwards curve related to BLS12-381 curves (that used in Zcash Sapling) and has modulus p equal to prime subgroup order of BLS12-381 
 # that helps to create optimal zkSnarks with high (128-bit) level of security and minimal number of constraints 
 # for any cryptosystem whose operations are in field GF(p), where p is a modulus of JubJub   
 # e = -1, d = -10240/10241 mod p  ( == 0x2a9318e74bfa2b48f5fd9207e6bd7fd4292d7f6d37579d2601065fd6d6343eb1)
@@ -19,29 +36,18 @@ Gx_JubJub = F_JubJub(80762466406628849098818017587043067140346099874558698045205
 Gy_JubJub = F_JubJub(13262374693698910701929044844600465831413122818447359594527400194675274060458)
 
 
-# BabyJubJub is Edwards curve with parameters 
-# BabyJubJub curve is related to BN128
-# subgroup order:
-q_BabyJubJub = 2736030358979909402780800718157159386076813972158567259200215660948447373041
-	      
-#coefficients e and d: 
-d_BabyJubJub = 168696 
-e_BabyJubJub = 168700
-#modulus
-p_BabyJubJub = 21888242871839275222246405745257275088548364400416034343698204186575808495617 
-F_BabyJubJub = GF(p_BabyJubJub)
-
-Gx_BabyJubJub = F_BabyJubJub(17777552123799933955779906779655732241715742912184938656739573121738514868268)
-Gy_BabyJubJub = F_BabyJubJub(2626589144620713026669568689430873010625803728049924121243784502389097019475)
- 
- 
 def add_points(x1, y1, x2, y2, d, e, F):
     xx = F(x1*x2)
-    yy = F(y1*y2)
-    dxxyy = F(d*xx*yy)
+    yy1 = F(y1)*F(y2)
+    dxxyy = F(d*xx*yy1)
     
     x3 = (F(x1*y2) + F(y1*x2)) * (1 + dxxyy)^-1
-    y3 = (xx - F(e)*yy) * (1 - dxxyy)^-1
+    
+    inv2 = (F(1) - dxxyy)^-1 
+    exx = F(e)*xx
+        
+    y3 = (yy1 - exx) * inv2
+    
     return x3, y3; 
 
 
@@ -200,9 +206,33 @@ def recover_pub_key(hash, r, s, recoveryID, Gx, Gy, q, d, e, p):
     x, y = add_points(Q1x, Q1y, Q2x, Q2y, d, e, Fp)
             
     return x, y
+
+def test_edw_addition(d, e, p):
     
+    Fp = GF(p)
     
-def test(testN, p, q, e, d, Gx, Gy):
+    a, b = coeff_edw_to_w(d, e, Fp)
+    
+    E = EllipticCurve(Fp, [a, b]) 
+    
+    R1 = E.random_point()
+    R2 = E.random_point()
+    R3 = R1 + R2
+    
+    r1x, r1y = coord_w_to_edw(R1[0], R1[1], d, e, Fp)
+    r2x, r2y = coord_w_to_edw(R2[0], R2[1], d, e, Fp)
+    r3x, r3y = coord_w_to_edw(R3[0], R3[1], d, e, Fp)
+        
+    r3x_4check, r3y_4check = add_points(r1x, r1y, r2x, r2y, d, e, Fp)
+    
+    if r3x == r3x_4check and r3y == r3y_4check :
+        return True
+    else:
+        return False
+    
+        
+    
+def test_sign_verify(testN, p, q, d, e, Gx, Gy):
 
     Fp = GF(p)
     Fq = GF(q)
@@ -254,13 +284,14 @@ def create_points_for_hash(seed, N, d, e, F, p):
             
             x = squareX.sqrt()
                             
-            points.append([x, y])
+            points.append([F(x), F(y)])
             n = n + 1
          
         y = int( hashlib.sha256(hex(y)).hexdigest(), 16)
         
             
     return points
+    
 
 def pedersen_hash(data, points, d, e, F):
     x = 0
@@ -282,18 +313,119 @@ def pedersen_hash(data, points, d, e, F):
     return x, y
 
 
-def test_pedersen():
-    seed = "Hello, World!"
-    generators_list = create_points_for_hash(seed, 512, d_JubJub, e_JubJub, F_JubJub, p_JubJub)
+def get_precomp_point(points, window_value, bits_in_window, d, e, F):
+    x = 0
+    y = 1
+
+    for i in range(bits_in_window):
+        if (1 << i) & window_value:
+            x, y = add_points(x, y, points[i][0], points[i][1], d, e, F)
+            
+    return x, y
+
+# input is one of chunks chunk_points: all generators for one of chunks
+# returns array with all possible results of addition of generators, where inde[ in array is value of window 
+
+def get_points_for_all_window_values(chunk_generators, bits_in_window, d, e, F):
     
-    message = "The quick brown fox jumps over the lazy dog"
-    x, y = pedersen_hash(message, generators_list, d_JubJub, e_JubJub, F_JubJub)
-    print(x, y)   
+    # values of chunk for all possible values of window (from 0 to (2^bits_in_window)-1 )
+    chunk_values_of_points = []
+      
+    for window_value in range(2^bits_in_window):
+   
+        x, y = get_precomp_point(chunk_generators, window_value, bits_in_window, d, e, F)
+        chunk_values_of_points.append([x, y])
+              
+    return chunk_values_of_points
+
+def extractKBits(num,k,p): 
+  
+     # convert number into binary first 
+     binary = bin(num) 
+  
+     # remove first two characters 
+     binary = binary[2:] 
+     
+     zeros2add = k - len(binary)%k
+     
+     while zeros2add != 0 :
+          binary = "0" + binary
+          zeros2add -=1
+
+     end = len(binary) - p 
+     start = end - k + 1
+  
+     # extract k  bit sub-string 
+     kBitSubStr = binary[start : end+1] 
+  
+     # convert extracted sub-string into decimal again 
+     #(int(kBitSubStr,2)) 
+
+     return int(kBitSubStr,2)
 
 
-print test(5, p_BabyJubJub, q_BabyJubJub, e_BabyJubJub, d_BabyJubJub,Gx_BabyJubJub, Gy_BabyJubJub )
-print test(5, p_JubJub, q_JubJub, e_JubJub, d_JubJub,Gx_JubJub, Gy_JubJub )
+def pedersen_hash_ex(data, window_len, chanks_precomps, d, e, F):
+    x = 0
+    y = 1
+    
+    number = 0    
+    b = bytearray(data)
+    pow = 2^8
+    lenth = len(b)
+    
+    for i in range(lenth):
+        number += b[i]*(pow^i)
+        
+    length_in_bits = number.nbits()
+    
+    number_of_chunks = (length_in_bits)//window_len
+    
+    if (length_in_bits%window_len) != 0:
+        number_of_chunks += 1 
+     
+    for j in range(number_of_chunks):
+        Kbit = extractKBits(number, window_len, 1 + j*window_len)
+        precompX = chanks_precomps[j][Kbit][0]
+        precompY = chanks_precomps[j][Kbit][1]
+        x, y = add_points(x, y, precompX, precompY, d, e, F)
+        #print hex(Kbit)
+    
+    return x, y
 
 
+#print test_sign_verify(5, p_BabyJubJub, q_BabyJubJub, d_BabyJubJub, e_BabyJubJub,Gx_BabyJubJub, Gy_BabyJubJub )
+#print test_sign_verify(5, p_JubJub, q_JubJub, d_JubJub, e_JubJub,Gx_JubJub, Gy_JubJub )
+#test_edw_addition(d_BabyJubJub, e_BabyJubJub, p_BabyJubJub)
 
 
+# test pedersen hash: 
+
+seed = "Hello, World!"
+
+# number of generators must be divisible by window len
+window_len = 8  
+
+generators_list = create_points_for_hash(seed, 512 + window_len, d_BabyJubJub, e_BabyJubJub, F_BabyJubJub, p_BabyJubJub)
+precomp_table_of_chunks = []
+
+num_of_chunks = len(generators_list)//window_len
+
+for i in range(num_of_chunks):
+    
+    ith_chunk_precomp = get_points_for_all_window_values(generators_list[i*window_len:], window_len, d_BabyJubJub, e_BabyJubJub, F_BabyJubJub)
+    precomp_table_of_chunks.append(ith_chunk_precomp)
+    
+print "OK. chunks calculated"
+
+data = [0x34, 0x11, 0x1c]
+
+x, y = pedersen_hash_ex(data, window_len, precomp_table_of_chunks, d_BabyJubJub, e_BabyJubJub, F_BabyJubJub)
+print(x, y)
+
+x1, y1 = pedersen_hash(data, generators_list, d_BabyJubJub, e_BabyJubJub, F_BabyJubJub)
+print(x1, y1) 
+
+if x == x1 and y == y1:
+    print "test OK"
+else:
+    print "test failed"
